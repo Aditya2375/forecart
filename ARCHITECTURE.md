@@ -1,4 +1,4 @@
-# ForeCart — architecture note (1 page)
+# ForeCart - architecture note (1 page)
 
 AgentX: The Agentic Commerce Challenge, Challenge 1 (Anticipatory Commerce).
 Team Do You Care (TM-AEFE9948F9D), Techfest 2026-27, IIT Bombay.
@@ -28,7 +28,7 @@ words ─▶ re-parse full text-so-far (parsing.py)
 
 ## Components
 
-- **parsing.py — incremental multilingual parser.** The request is re-parsed
+- **parsing.py - incremental multilingual parser.** The request is re-parsed
   from scratch after every word, so the *last mention of each field wins*.
   Corrections ("black, no wait, white") and late constraints ("oh, and in
   blue") need no special-case state machine. Extraction matches a
@@ -37,11 +37,11 @@ words ─▶ re-parse full text-so-far (parsing.py)
   XL", "2xl", "32 waist"), and prices as digits, `1.5k`, `Rs. 4000`, English
   number words and Hindi amounts ("dhai hazaar tak", "pandrah sau se kam").
   Hindi-English code-mixed requests parse through the same path.
-- **search.py — counted retrieval.** The catalogue is only ever touched
+- **search.py - counted retrieval.** The catalogue is only ever touched
   through the harness's counted search. A lookup fires only when the parsed
   filters actually changed and are specific enough to commit on; identical
-  lookups are memoised. Result: 1.12 searches/request (baseline ~6).
-- **agent.py — precision-first commit policy.** Commit only when the match is
+  lookups are memoised. Result: 1.12 searches/request (baseline 1.53).
+- **agent.py - precision-first commit policy.** Commit only when the match is
   *unique*, the reading is *fully specified* (all five fields), the stream has
   been quiet for a short window, and a wrap-up marker is present. A late
   extra constraint cannot invalidate such a commit: narrowing a unique match
@@ -59,7 +59,7 @@ Score **40.5** vs baseline 20.0 · final-answer accuracy **1.000** vs 0.527 ·
 All retrieval sits behind one counted backend call (`tools.search`). That call
 is the wiring point for **Rezolve Labs semantic product search**: swap the
 local catalogue ranker for the semantic-search endpoint and the parser, commit
-policy and search budget are untouched — the same discipline that gives 1.12
+policy and search budget are untouched - the same discipline that gives 1.12
 searches/request locally is what keeps API spend bounded at production
 catalogue scale. The team credit coupon promised in the problem statement is
 still "to be confirmed" by the organisers, so the shipped build runs against
