@@ -7,9 +7,9 @@ thousand …"). Most assistants wait for the end of the sentence and then search
 forecart re-reads the request after every word, keeps its own picture of the
 shopper's filters, checks how many products in the catalogue still fit, and
 shows the product the moment the fit is unique and the request is done
-changing — never earlier.
+changing - never earlier.
 
-Built for AgentX: The Agentic Commerce Challenge (Challenge 1 — Anticipatory
+Built for AgentX: The Agentic Commerce Challenge (Challenge 1 - Anticipatory
 Commerce), Techfest 2026-27, IIT Bombay. Team **Do You Care** (TM-AEFE9948F9D).
 
 ## Results on the public dev set (300 requests)
@@ -19,9 +19,9 @@ Commerce), Techfest 2026-27, IIT Bombay. Team **Do You Care** (TM-AEFE9948F9D).
 | score | **40.5** | 20.0 |
 | accuracy (final answer) | **1.000** | 0.527 |
 | wrong commits | **0** | 0 |
-| filters extracted correctly (all 5 fields, all 300 requests) | **100%** | — |
-| searches per request | **1.12** | ~6 |
-| latency | 0.24 ms/word | — |
+| filters extracted correctly (all 5 fields, all 300 requests) | **100%** | - |
+| searches per request | **1.12** | 1.53 |
+| latency | 0.35 ms/word | - |
 
 Breakdown by request kind (corrections, late constraints, Hindi-English
 code-mixed, plain): accuracy 1.000 in every bucket, zero wrong commits in
@@ -44,16 +44,16 @@ Three ideas do the work:
 
 1. **Closed-world vocabulary.** Every brand, category, colour and size in the
    catalogue is enumerable, so extraction is matching against known values
-   with their surface forms — "runners", "jogging shoes", "slides",
+   with their surface forms - "runners", "jogging shoes", "slides",
    "floaters", "rucksack", "wristwatch", "double XL", "2xl", "32 waist",
-   "kaala", "gulabi", "saadhe teen hazaar", "pandrah sau se kam" — instead of
+   "kaala", "gulabi", "saadhe teen hazaar", "pandrah sau se kam" - instead of
    guessing. Budgets handle digits, `1.5k`, `Rs. 4000`, English number words
    ("forty five hundred") and Hindi amounts ("dhai hazaar tak").
 2. **Last mention wins.** The whole text-so-far is re-parsed after each word,
    so a correction ("black, no wait, white", "size M, oops, XS") or a late
    constraint ("oh, and in blue") simply changes the latest mention of that
    field. There is no correction-specific state machine to get wrong.
-3. **A commit rule that would rather be early than sorry — and is never
+3. **A commit rule that would rather be early than sorry - and is never
    sorry.** Committing to the wrong product costs more than earliness can
    ever win back, so a product is shown only when it is the *unique* match of
    a *fully specified* reading (category, colour, size, brand, budget) that
@@ -68,8 +68,8 @@ Three ideas do the work:
 **Search discipline.** The catalogue is treated as a remote store: products
 are only ever looked up through counted searches. A search is fired only when
 the filter reading actually changes and is specific enough to commit on, and
-identical lookups are memoised — 1.12 searches per request on the dev set,
-against ~6 for the baseline.
+identical lookups are memoised: 1.12 searches per request on the dev set,
+against 1.53 for the baseline.
 
 ## Rezolve Labs capability
 
