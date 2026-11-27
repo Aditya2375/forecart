@@ -53,6 +53,17 @@ CATEGORY_FORMS = [
     ("jackets", "jackets"),
     ("jacket", "jackets"),
     ("denims", "jeans"),
+    ("kurti", "kurtas"),
+    ("kurtis", "kurtas"),
+    ("slippers", "sandals"),
+    ("chappals", "sandals"),
+    ("flip flops", "sandals"),
+    ("pullover", "hoodies"),
+    ("earbuds", "headphones"),
+    ("purse", "wallets"),
+    ("gown", "dresses"),
+    ("frock", "dresses"),
+    ("denim", "jeans"),
     ("jeans", "jeans"),
     ("shirts", "shirts"),
     ("shirt", "shirts"),
@@ -73,6 +84,7 @@ COLOUR_FORMS = [
     ("kala", "black"),
     ("safed", "white"),
     ("laal", "red"),
+    ("lal", "red"),
     ("neela", "blue"),
     ("hara", "green"),
     ("peela", "yellow"),
@@ -122,6 +134,8 @@ NUMBER_WORDS = {
     "pachees": 25, "tees": 30, "paintis": 35, "chalis": 40,
     "paintalis": 45, "pachas": 50, "saath": 60, "sattar": 70, "assi": 80,
 }
+TENS_WORDS = {"twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety",
+              "bees", "tees", "chalis", "pachas", "saath", "sattar", "assi", "pachees", "paintis", "paintalis"}
 HINDI_HALF = {"dedh": 1.5, "dhai": 2.5, "dhaai": 2.5}   # dedh/dhai hazaar
 
 CORRECTION_CUES = [
@@ -190,20 +204,34 @@ def _number_words_value(tokens, i):
     """Parse a number-word phrase starting at tokens[i]; returns (value, next_i) or None."""
     total, current, seen = 0, 0, False
     j = i
+    prev = None          # previous plain number word since the last multiplier
     while j < len(tokens):
         w = tokens[j]
         if w in NUMBER_WORDS:
+            # "ten chhe" / "eight teen" are two separate numbers (a size, then
+            # an amount), not one: a plain word may follow another only when
+            # the first is a tens word ("twenty five")
+            if prev is not None and prev != "saadhe" and not (prev in TENS_WORDS and NUMBER_WORDS[w] < 10):
+                break
+            prev = w
             current += NUMBER_WORDS[w]
             seen = True
         elif w in HINDI_HALF:
+            if prev is not None:
+                break
+            prev = w
             current += HINDI_HALF[w]
             seen = True
         elif w == "saadhe":
+            if prev is not None:
+                break
+            prev = "saadhe"
             current += 0.5
             seen = True
         elif w == "hundred" or w == "sau":
             current = (current or 1) * 100
             seen = True
+            prev = None
             # catalogue prices are round hundreds; stop here so a following
             # unrelated number word ("... five hundred. one more thing")
             # is not swallowed into the amount
@@ -213,6 +241,7 @@ def _number_words_value(tokens, i):
             total += (current or 1) * 1000
             current = 0
             seen = True
+            prev = None
         else:
             break
         j += 1
@@ -299,6 +328,10 @@ def _prices(norm, want_spans=False):
     return (out, spans) if want_spans else out
 
 
+_AMOUNT_LEAD = {"under", "below", "within", "max", "than", "upto", "to", "budget", "of", "rs", "rupees", "saadhe"}
+_AMOUNT_TAIL = {"hundred", "thousand", "hazaar", "sau"}
+
+
 def _sizes(norm, tokens, price_spans):
     """(start_pos, size) mentions. Context forms first, then standalone forms;
     longest match wins overlaps, and tokens already used by a price are skipped."""
@@ -326,6 +359,12 @@ def _sizes(norm, tokens, price_spans):
                 s, e = offsets[i]
                 if any(s >= ps and e <= pe for ps, pe in price_spans):
                     continue
+                # "forty five", "under six ...": part of an amount still being
+                # said, not a shoe size (matters while the request is streaming)
+                if i > 0 and (tokens[i - 1] in TENS_WORDS or tokens[i - 1] in _AMOUNT_LEAD):
+                    continue
+                if i + 1 < len(tokens) and tokens[i + 1] in _AMOUNT_TAIL:
+                    continue
                 out.append((s, e, str(NUMBER_WORDS[t])))
     # resolve overlaps: longest span first, then the latest surviving mention wins
     out = [o for o in out if o[2]]
@@ -339,13 +378,17 @@ def _sizes(norm, tokens, price_spans):
     return kept
 
 
+VALID_NUMERIC_SIZES = set(range(4, 14)) | set(range(26, 47))
+
+
 def _size_value(raw):
     raw = raw.strip().lower()
     if raw in SIZE_WORDS:
         return SIZE_WORDS[raw]
     if raw.isdigit():
-        return raw
-    if raw in NUMBER_WORDS:
+        # a price or a quantity sitting next to "uk"/"waist" is not a size
+        return raw if int(raw) in VALID_NUMERIC_SIZES else None
+    if raw in NUMBER_WORDS and NUMBER_WORDS[raw] in VALID_NUMERIC_SIZES:
         return str(NUMBER_WORDS[raw])
     return None
 
@@ -413,7 +456,12 @@ def parse(text):
             cue_tok = max(cue_tok, tok_of(m.start()))
 
     last_mention = max((tok_of(m[1] - 1) for m in mentions.values()), default=-1)
-    wrap = any(re.search(r"\b" + re.escape(mk) + r"\b", norm) for mk in WRAP_MARKERS)
+    # a closer only counts when it comes AFTER the newest field mention: an
+    # opening "please find ..." says nothing about whether the filters are done
+    last_start = max((m[0] for m in mentions.values()), default=-1)
+    wrap = any(m.start() > last_start
+               for mk in WRAP_MARKERS
+               for m in re.finditer(r"\b" + re.escape(mk) + r"\b", norm))
 
     return ParsedRequest(filters=filters, n_fields=len(filters),
                          last_mention_tok=last_mention, cue_tok=cue_tok,

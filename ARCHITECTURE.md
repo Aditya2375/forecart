@@ -1,73 +1,42 @@
-# ForeCart - architecture note (1 page)
+# forecart: architecture note (1 page)
 
-AgentX: The Agentic Commerce Challenge, Challenge 1 (Anticipatory Commerce).
-Team Do You Care (TM-AEFE9948F9D), Techfest 2026-27, IIT Bombay.
+AgentX: The Agentic Commerce Challenge, Challenge 1 (Anticipatory Commerce). Team Do You Care (TM-AEFE9948F9D), Techfest 2026-27, IIT Bombay.
 
 ## Problem
 
-A shopping request streams in one word at a time. The agent must decide, after
-every word, whether to show a product (commit) or keep waiting. A wrong commit
-is heavily penalised, every catalogue lookup is counted, and the earlier a
-correct commit lands, the better the score.
+A request streams in one word at a time. After every word the agent either commits to a product or waits. A wrong commit costs 1.0, every catalogue lookup is counted, and a correct commit earns more the earlier it lands. Requests carry corrections ("black, no wait, white"), late constraints ("oh, and in blue") and Hindi-English mixing.
 
 ## Data flow
 
 ```
-words ─▶ re-parse full text-so-far (parsing.py)
-            │  closed-world extraction: category / colour / size / brand / max_price
-            ▼
-        filter state  ─changed?─▶ one counted search (search.py over catalogue)
-            │                        │
-            ▼                        ▼
-        commit policy (agent.py): unique match AND fully specified AND
-        wrap-up cue seen AND short quiet window  ─▶  COMMIT product
-            │
-        finish(): re-read everything, answer best fit, relax soft
-        constraints (budget → size → brand → colour) only if nothing fits
+word --> re-parse full text so far (parsing.py) --> filters {category, colour, size, brand, max_price}
+              |
+              +-- changed and fully specified? --> one counted search (memoised)
+              |
+         unique match AND quiet for a word AND a closing cue seen? --> COMMIT
+              |
+         finish(): re-read everything, answer the best fit, relax budget, size, brand, colour in that order only if nothing fits
 ```
 
 ## Components
 
-- **parsing.py - incremental multilingual parser.** The request is re-parsed
-  from scratch after every word, so the *last mention of each field wins*.
-  Corrections ("black, no wait, white") and late constraints ("oh, and in
-  blue") need no special-case state machine. Extraction matches a
-  closed-world vocabulary built from the catalogue: surface forms and
-  synonyms ("runners", "floaters", "rucksack", "wristwatch"), sizes ("double
-  XL", "2xl", "32 waist"), and prices as digits, `1.5k`, `Rs. 4000`, English
-  number words and Hindi amounts ("dhai hazaar tak", "pandrah sau se kam").
-  Hindi-English code-mixed requests parse through the same path.
-- **search.py - counted retrieval.** The catalogue is only ever touched
-  through the harness's counted search. A lookup fires only when the parsed
-  filters actually changed and are specific enough to commit on; identical
-  lookups are memoised. Result: 1.12 searches/request (baseline 1.53).
-- **agent.py - precision-first commit policy.** Commit only when the match is
-  *unique*, the reading is *fully specified* (all five fields), the stream has
-  been quiet for a short window, and a wrap-up marker is present. A late
-  extra constraint cannot invalidate such a commit: narrowing a unique match
-  cannot change which product it is. Constants were picked by a grid search
-  (`tune.py`) on the public dev set and frozen before the final run.
+- **parsing.py** is the whole language layer. Extraction matches a closed-world vocabulary built from the catalogue: surface forms and synonyms (runners, floaters, rucksack, wristwatch), sizes (double XL, 2xl, 32 waist, UK 9), budgets as digits, 1.5k, Rs. 4000, English number words and Hindi amounts (dhai hazaar tak, pandrah sau se kam). The text is re-parsed from scratch after each word, so the last mention of a field wins and corrections need no state machine. Number phrases are checked for well-formedness so a size next to a budget ("ten chhe hazaar") is not merged into it.
+- **agent.py** is the commit policy. Commit only when the match is unique, every field that product type has is set (size is skipped for watches, wallets, caps, headphones, backpacks), the reading has been quiet for a word, no correction cue is in the last four words, and a closer comes after the newest field mention: a marker such as "please", "if you have it", "chahiye", or the first word of one ("for", "as", "need"). Words that can start a correction ("it", "no", "that") are not closers.
+- **Search budget.** Retrieval is only through the counted search call. It fires when the filters change and are specific enough to commit on, and repeats are memoised: 1.13 searches per request on dev (baseline 1.53).
 
-## Results (public dev set, 300 requests)
+## Results
 
-Score **40.5** vs baseline 20.0 · final-answer accuracy **1.000** vs 0.527 ·
-**0 wrong commits** · 100% filter extraction on all five fields ·
-0.35 ms/word, standard library only.
+| set | score | accuracy | wrong commits |
+|---|---|---|---|
+| public dev set, 300 requests | 42.3 (baseline 20.0) | 1.000 (baseline 0.527) | 0 |
+| 9,600 generated stress requests (stress.py) | 44.7 (baseline 16.5) | 1.000 | 0 |
+
+All five filters are extracted correctly on all 300 dev requests. About 0.2 ms per word on CPU, standard library only, no model calls. The stress set is our own generator (new phrasings, number forms, synonyms); it measures robustness, not the organisers' hidden set. Earliness is 4.3% of the request on dev against 16.3% for a perfect oracle: the policy trades it for zero wrong commits.
 
 ## Rezolve Labs integration point
 
-All retrieval sits behind one counted backend call (`tools.search`). That call
-is the wiring point for **Rezolve Labs semantic product search**: swap the
-local catalogue ranker for the semantic-search endpoint and the parser, commit
-policy and search budget are untouched - the same discipline that gives 1.12
-searches/request locally is what keeps API spend bounded at production
-catalogue scale. The team credit coupon promised in the problem statement is
-still "to be confirmed" by the organisers, so the shipped build runs against
-the kit's local search; the integration point is code-complete and activates
-the moment access arrives.
+All retrieval sits behind one counted call, `tools.search`. Swapping the local ranker for the Rezolve Labs semantic-search endpoint changes that call only; the parser, the commit policy and the search budget stay as they are, and the budget is what would bound API spend on a large catalogue. The shipped build uses the kit's local search because no Rezolve access has been issued; no Rezolve code is included.
 
-## Cost
+## Cost and scale
 
-Development and evaluation ran entirely on a free tier: CPU-only, no external
-APIs, no model calls. Marginal cost per evaluated request is effectively zero;
-production cost is bounded by the search budget above.
+Development and evaluation ran on free tooling: one CPU core, no external APIs, no model calls. Per-word work is a regex pass over the text so far, which is linear in request length and independent of catalogue size. Catalogue size only affects the counted search, which is already isolated behind one interface.

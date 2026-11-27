@@ -7,19 +7,19 @@ reqs = [json.loads(l) for l in open("dev.jsonl")]
 parsing_brands = {p["brand"] for p in load_catalogue() if p["brand"]}
 
 rows = []
-for quiet, minf, cue, mintok, closer in itertools.product(
-        (1, 2, 3), (3, 4), (4,), (6,), (True, False)):
-    agent.QUIET_WORDS, agent.MIN_FIELDS = quiet, minf
+for quiet, cue, mintok, closer in itertools.product(
+        (1, 2, 3), (3, 4, 5), (6,), (True, False)):
+    agent.QUIET_WORDS = quiet
     agent.CUE_WINDOW, agent.MIN_TOKENS = cue, mintok
     agent.REQUIRE_WRAP = closer
     results, _ = evaluate.run(agent.Agent, reqs)
     s = evaluate.summarise(results)
     rows.append((s["score"], s["wrong_commits"], s["early_share"], s["searches"],
-                 quiet, minf, cue, mintok, closer))
+                 quiet, cue, mintok, closer))
 rows.sort(reverse=True)
-print("score  wrong  early%  searches | quiet fields cue mintok closer")
+print("score  wrong  early%  searches | quiet cue mintok closer")
 for r in rows[:20]:
-    print(f"{r[0]:5.1f}  {r[1]:5d}  {r[2]:6.1%}  {r[3]:8.2f} | {r[4]} {r[5]} {r[6]} {r[7]} {r[8]}")
+    print(f"{r[0]:5.1f}  {r[1]:5d}  {r[2]:6.1%}  {r[3]:8.2f} | {r[4]} {r[5]} {r[6]} {r[7]}")
 print("...")
 for r in rows[-5:]:
-    print(f"{r[0]:5.1f}  {r[1]:5d}  {r[2]:6.1%}  {r[3]:8.2f} | {r[4]} {r[5]} {r[6]} {r[7]} {r[8]}")
+    print(f"{r[0]:5.1f}  {r[1]:5d}  {r[2]:6.1%}  {r[3]:8.2f} | {r[4]} {r[5]} {r[6]} {r[7]}")

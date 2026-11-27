@@ -16,10 +16,18 @@ FILTER_KEYS = ("category", "colour", "size", "brand", "max_price")
 
 # commit policy (tuned on dev.jsonl; see tune.py)
 QUIET_WORDS = 1        # words since the reading last changed
-MIN_FIELDS = 5         # commit only on a fully-specified reading
 CUE_WINDOW = 4         # no correction cue within this many recent words
 MIN_TOKENS = 6         # never commit before the request is at least this long
 REQUIRE_WRAP = True    # commit only once a wrap-up marker has been seen
+# A shopper who has just finished the filters moves on to a closer ("for my
+# brother", "if you have it", "please", "chahiye"). Seeing the first word of one
+# right after the reading went quiet is the same signal as the full marker,
+# a few words sooner. Words that can also start a correction ("it", "no",
+# "that") are deliberately left out.
+CLOSER_STARTS = frozenset({
+    "for", "if", "as", "please", "pls", "thanks", "thank", "need", "nothing",
+    "this", "chahiye", "milega", "dikhao", "hai",
+})
 
 # order in which constraints are relaxed if the full reading fits nothing
 RELAX_ORDER = ("max_price", "size", "brand", "colour")
@@ -28,7 +36,12 @@ RELAX_ORDER = ("max_price", "size", "brand", "colour")
 class Agent:
     def __init__(self, tools):
         self.tools = tools
-        parsing.set_brands({p["brand"] for p in load_catalogue() if p["brand"]})
+        cat = load_catalogue()
+        parsing.set_brands({p["brand"] for p in cat if p["brand"]})
+        # categories the catalogue never sizes (watches, wallets, caps ...):
+        # for them "fully specified" means four fields, not five
+        sized = {p["category"] for p in cat if p["size"]}
+        self.sizeless = {p["category"] for p in cat} - sized
         self._cache = {}
 
     # ------------------------------------------------------------- helpers
@@ -52,16 +65,29 @@ class Agent:
         self.committed = None
         self.current = None
 
+    def _complete(self, filters):
+        """True when every field this kind of product can be filtered by is set."""
+        need = ("category", "colour", "brand", "max_price")
+        if filters.get("category") not in self.sizeless:
+            need += ("size",)
+        return all(k in filters for k in need)
+
+    def _read(self, text):
+        parsed = parsing.parse(text)
+        if parsed.filters.get("category") in self.sizeless:
+            parsed.filters.pop("size", None)      # a stray size word means nothing here
+        return parsed
+
     def observe(self, word):
         self.words.append(word)
         text = " ".join(self.words)
-        parsed = parsing.parse(text)
+        parsed = self._read(text)
         filters = parsed.filters
 
         if filters != self.last_filters:
             # a single field never pins a product; save the search until the
             # reading is specific enough that a commit is even possible
-            if parsed.n_fields >= MIN_FIELDS:
+            if self._complete(filters):
                 hits = self._candidates(text, filters)
                 self.current = hits[0]["product_id"] if len(hits) == 1 else None
             else:
@@ -83,19 +109,21 @@ class Agent:
             return False
         if parsed.n_tokens < MIN_TOKENS:
             return False
-        if parsed.n_fields < MIN_FIELDS:
+        if not self._complete(parsed.filters):
             return False
         if self.quiet < QUIET_WORDS:
             return False
         if parsed.cue_tok >= 0 and parsed.n_tokens - 1 - parsed.cue_tok < CUE_WINDOW:
             return False
         if REQUIRE_WRAP and not parsed.wrap:
-            return False
+            closer = self.words[-1].lower().strip(",.?!;:")
+            if closer not in CLOSER_STARTS:
+                return False
         return True
 
     def finish(self):
         text = " ".join(self.words)
-        filters = parsing.parse(text).filters
+        filters = self._read(text).filters
         if filters == self.last_filters and self.current is not None:
             return self.current          # the last counted search already settled it
         hits = self._candidates(text, filters)
